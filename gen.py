@@ -16,6 +16,7 @@ import re
 import sys
 
 import font
+import wordmark
 
 # Alphabetical, so the picture does not rank anyone.
 INVESTORS = sorted([
@@ -79,8 +80,10 @@ def floori(x):
 
 
 def num(x):
-    s = repr(float(x))
-    return s if "e" not in s else f"{x:.12f}"
+    s = f"{float(x):.7g}"
+    if "e" in s:
+        s = f"{float(x):.10f}".rstrip("0")
+    return s if "." in s else s + ".0"
 
 
 def vec(v):
@@ -134,61 +137,108 @@ def srgb(hex_color):
 
 
 PURPLE, BLUE = srgb("#895AF8"), srgb("#80BEFF")
+LOGO_BLUE = srgb("#5FA8FF")   # a touch deeper: the filmic curve lifts it back
 
 #            base color          kd    kr    tint                  spec
 MATERIALS = {
-    "chrome":  ((0.02, 0.02, 0.03), 0.20, 0.78, (0.92, 0.93, 0.97), 1.0),
-    "pearl":   ((0.80, 0.80, 0.86), 0.85, 0.22, (1.0, 1.0, 1.0),    0.8),
-    "ink":     (srgb("#2A2352"),    0.90, 0.25, (1.0, 1.0, 1.0),    0.8),
-    "violet":  (PURPLE,             0.90, 0.18, (1.0, 1.0, 1.0),    0.7),
-    "purple":  (PURPLE,             0.90, 0.10, (1.0, 1.0, 1.0),    0.45),
-    "blue":    (BLUE,               0.90, 0.10, (1.0, 1.0, 1.0),    0.45),
-    "white":   ((0.92, 0.92, 0.95), 0.90, 0.08, (1.0, 1.0, 1.0),    0.45),
+    "pearl":   ((0.78, 0.78, 0.84), 0.80, 0.25, (1.0, 1.0, 1.0),    0.9),
+    "ink":     (srgb("#2A2352"),    0.90, 0.05, (1.0, 1.0, 1.0),    0.5),
+    "violet":  (PURPLE,             0.75, 0.35, (0.85, 0.80, 1.0),  1.0),
+    "logo":    (PURPLE,             0.90, 0.12, (1.0, 1.0, 1.0),    0.6),
 }
 THEMES = {
-    "light": dict(floor_a="#E9E2FF", floor_b="#FFFFFF", floor_kr=0.18, horizon="#F3EEFF", zenith="#6E55C8",
-                  haze="#F1ECFF", amb=0.30, text="ink", shadow=0.3),
-    "dark":  dict(floor_a="#1B1636", floor_b="#2A2352", floor_kr=0.35, horizon="#3A2C7A", zenith="#07051A",
-                  haze="#2A2160", amb=0.10, text="pearl", shadow=1.0),
+    # haze (the far floor) is the horizon color, so floor and sky meet without a seam.
+    "light": dict(floor="#F4F1FF", grid="#B9A8F2", floor_kr=0.25, horizon="#E9E3FF", zenith="#9C8BE6",
+                  amb=0.30, text="ink", shadow=0.3, exposure=0.95),
+    "dark":  dict(floor="#0E0B22", grid="#5A43C9", floor_kr=0.45, horizon="#24195E", zenith="#05040F",
+                  amb=0.10, text="pearl", shadow=1.0, exposure=1.6),
 }
 THEME = THEMES["dark"]
-FLOOR = {"tile": 12.0}
+# The wordmark: bold, wide tubes, like the SereneDB logo's lettering.
+TITLE = dict(shape="wordmark", tube=0.3, cell=0.8)
+TILE = 8.0
+GRID_LINE = 0.035   # half-width of a floor grid line, as a fraction of a tile
 
 
 class Text:
-    """Lines of text standing on the y = y0 plane; row 0 is the top line."""
+    """Lines of tube lettering standing on the y = y0 plane, its baseline at z_bottom.
 
-    def __init__(self, lines, x0, z_bottom, y0=0.0, sp=1.0, radius=0.6, mat="chrome", align="left", line_gap=3,
-                 columns=1, col_gap=10):
-        """`lines` fill `columns` columns top to bottom; each column is as wide as its longest line."""
+    The segments are binned into square cells of the text plane, so a ray tests only
+    the tubes in the cells it passes through (cells holds offsets into ids, CSR style).
+    """
+
+    def __init__(self, lines, x0, z_bottom, y0=0.0, size=1.0, tube=0.42, mat="pearl", align="left",
+                 line_gap=4.0, columns=1, col_gap=8.0, stretch=1.0, spacing=font.SPACING, shape="font", cell=2.0):
+        """shape="wordmark" ignores `lines` and draws the SereneDB logo's lettering."""
         per = -(-len(lines) // columns)
-        cols = [[font.banner(t) for t in lines[c * per:(c + 1) * per]] for c in range(columns)]
-        widths = [max(w for _, w in col) for col in cols]
+        draw = ((lambda t: wordmark.layout(font.CAP)) if shape == "wordmark"
+                else (lambda t: font.layout(t, spacing, stretch) + (None,)))
+        cols = [[draw(t) for t in lines[c * per:(c + 1) * per]] for c in range(columns)]
+        self.cell_units = cell
+        widths = [max(w for _, w, _ in col) for col in cols]
+        segs, flat, cx = [], [], 0.0
+        for c, col in enumerate(cols):
+            for i, (ss, w, n_outline) in enumerate(col):
+                dx = cx + ((widths[c] - w) / 2 if align == "center" else 0.0)
+                dz = (per - 1 - i) * (font.CAP + line_gap)
+                segs += [((dx + p[0], dz + p[1]), (dx + q[0], dz + q[1])) for p, q in ss]
+                # Fill tubes get a flat-faced normal, so a filled letter is not striped.
+                flat += [0 if n_outline is None or j < n_outline else 1 for j in range(len(ss))]
+            cx += widths[c] + col_gap
+        self.width = (cx - col_gap) * size
+        self.height = ((per - 1) * (font.CAP + line_gap) + font.CAP) * size
+        self.x0, self.zb, self.y0, self.size, self.mat = x0, z_bottom, y0, size, mat
+        self.r = tube * size
+        self.segs, self.flat = segs, flat
 
-        def cell(b, w, cw):
-            pad = (cw - w) // 2 if align == "center" else 0
-            return ["." * pad + r.ljust(cw - pad, ".") for r in b]
+    def place(self, x0=None, z_bottom=None):
+        if x0 is not None:
+            self.x0 = x0
+        if z_bottom is not None:
+            self.zb = z_bottom
 
-        rows = []
-        for i in range(per):
-            if i:
-                rows += [""] * line_gap
-            line = [""] * font.ROWS
-            for c, col in enumerate(cols):
-                b, w = col[i] if i < len(col) else ([""] * font.ROWS, 0)
-                sep = "." * col_gap if c + 1 < len(cols) else ""
-                line = [l + x + sep for l, x in zip(line, cell(b, w, widths[c]))]
-            rows += line
-        self.nc = max(len(r) for r in rows)
-        rows = [r.ljust(self.nc, ".") for r in rows]
-        self.rows, self.nr = rows, len(rows)
-        self.sp, self.r, self.y0, self.mat = sp, radius * sp, y0, mat
-        self.x0 = x0
-        self.zt = z_bottom + (self.nr - 1) * sp
-        self.width, self.height = (self.nc - 1) * sp, (self.nr - 1) * sp
+    @property
+    def zt(self):
+        return self.zb + self.height
 
-    def bits(self):
-        return "[" + ",".join("1" if c == "#" else "0" for r in self.rows for c in r) + "]"
+    def world(self):
+        k = self.size
+        return [((self.x0 + p[0] * k, self.zb + p[1] * k), (self.x0 + q[0] * k, self.zb + q[1] * k)) for p, q in self.segs]
+
+    def grid(self):
+        segs = self.world()
+        r = self.r
+        self.gx0 = min(min(p[0], q[0]) for p, q in segs) - r
+        self.gz0 = min(min(p[1], q[1]) for p, q in segs) - r
+        gx1 = max(max(p[0], q[0]) for p, q in segs) + r
+        gz1 = max(max(p[1], q[1]) for p, q in segs) + r
+        self.cell = self.cell_units * self.size
+        self.ncx = int((gx1 - self.gx0) / self.cell) + 1
+        self.ncz = int((gz1 - self.gz0) / self.cell) + 1
+        cells = [[] for _ in range(self.ncx * self.ncz)]
+        for i, (p, q) in enumerate(segs):
+            for cz in range(int((min(p[1], q[1]) - r - self.gz0) / self.cell), int((max(p[1], q[1]) + r - self.gz0) / self.cell) + 1):
+                for cx in range(int((min(p[0], q[0]) - r - self.gx0) / self.cell), int((max(p[0], q[0]) + r - self.gx0) / self.cell) + 1):
+                    if seg_box_dist(p, q, self.gx0 + cx * self.cell, self.gz0 + cz * self.cell, self.cell) <= r:
+                        cells[cz * self.ncx + cx].append(i)
+        start, ids = [], []
+        for c in cells:
+            start.append(len(ids))
+            ids += c
+        return segs, start, [len(c) for c in cells], ids
+
+
+def seg_box_dist(p, q, bx, bz, size):
+    """Distance from segment pq to the square [bx, bx + size] x [bz, bz + size], sampled."""
+    best = 1e9
+    n = max(16, int(math.hypot(q[0] - p[0], q[1] - p[1]) / (0.05 * size)))
+    for i in range(n + 1):
+        t = i / n
+        x, z = p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
+        dx = max(bx - x, 0.0, x - bx - size)
+        dz = max(bz - z, 0.0, z - bz - size)
+        best = min(best, math.hypot(dx, dz))
+    return best
 
 
 class Ball:
@@ -197,46 +247,28 @@ class Ball:
 
 
 def layout(name):
-    texts, balls = [], []
     if name == "investors":
         # Investors on the left in two columns, the SereneDB mark and name on the right.
-        inv = Text(INVESTORS, x0=0.0, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], columns=2)
-        texts.append(inv)
-        R = 0.42 * inv.height
-        cx = inv.width + 0.3 * inv.height + R
-        sdb = Text(["SERENEDB"], x0=0.0, z_bottom=4.0, sp=1.6, radius=0.72, mat="violet")
-        sdb.x0 = cx - sdb.width / 2
-        texts.append(sdb)
-        cz = sdb.zt + sdb.r + 0.06 * inv.height + R
-        balls += logo((cx, 0.35 * R, cz), R)
-        bbox = (0.0, cx + R, 0.0, max(inv.zt, cz + R))
+        inv = Text(INVESTORS, x0=0.0, z_bottom=3.0, mat=THEME["text"], columns=2, col_gap=8.0)
+        title = Text(["SereneDB"], x0=0.0, z_bottom=3.0, size=2.2, mat="violet", **TITLE)
+        R = 0.5 * (inv.height - title.height - 6.0)
+        cx = inv.width + 14.0 + max(R, title.width / 2)
+        title.place(x0=cx - title.width / 2)
+        ball = Ball((cx, 0.0, title.zt + 6.0 + R), R, "logo")
+        bbox = (0.0, max(cx + R, title.x0 + title.width), 0.0, max(inv.zt, ball.c[2] + R))
     elif name == "banner":
         # The SereneDB mark and name on top, the investors in four columns below.
-        inv = Text(INVESTORS, x0=0.0, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], align="center",
-                   columns=4, col_gap=12)
-        texts.append(inv)
-        total = inv.width
-        top = inv.zt + 16.0
-        sdb = Text(["SERENEDB"], x0=0.0, z_bottom=top, sp=2.6, radius=0.72, mat="violet")
-        R = 0.95 * sdb.height
-        sdb.x0 = (total - sdb.width + 2.4 * R) / 2
-        texts.append(sdb)
-        balls += logo((sdb.x0 - 1.4 * R, 0.6 * R, top + sdb.height / 2), R)
-        bbox = (0.0, total, 0.0, top + sdb.height / 2 + R)
+        inv = Text(INVESTORS, x0=0.0, z_bottom=3.0, mat=THEME["text"], align="center", columns=4, col_gap=9.0)
+        title = Text(["SereneDB"], x0=0.0, z_bottom=inv.zt + 14.0, size=3.0, mat="violet", **TITLE)
+        R = 0.8 * title.height
+        row = 2 * R + 0.3 * R + title.width
+        start = (inv.width - row) / 2
+        title.place(x0=start + 2.3 * R)
+        ball = Ball((start + R, 0.0, title.zb + title.height * 0.5), R, "logo")
+        bbox = (0.0, inv.width, 0.0, max(title.zt, ball.c[2] + R))
     else:
         sys.exit(f"unknown layout {name}")
-    return texts, balls, bbox
-
-
-def logo(c, R):
-    """The SereneDB mark: a purple sphere, a blue one bulging out of it toward the
-    viewer and up-right, and a white highlight sphere bulging out of the blue one."""
-    cx, cy, cz = c
-    return [
-        Ball(c, R, "purple"),
-        Ball((cx + 0.22 * R, cy - 0.42 * R, cz + 0.17 * R), 0.70 * R, "blue"),
-        Ball((cx + 0.42 * R, cy - 0.78 * R, cz + 0.36 * R), 0.32 * R, "white"),
-    ]
+    return [inv, title], [ball], bbox
 
 
 # ---- the query --------------------------------------------------------------------
@@ -273,31 +305,77 @@ def build(args):
     const("shadow", num(THEME["shadow"]))
     const("shin", "70.0")
     const("horizon", vec(srgb(THEME["horizon"])))
+    const("camR", vec(right))
+    const("camU", vec(up))
+    const("camF", vec(fwd))
     const("zenith", vec(srgb(THEME["zenith"])))
-    const("haze", vec(srgb(THEME["haze"])))
+    const("haze", vec(srgb(THEME["horizon"])))
     const("fogStart", num(dist * 0.9))
     const("fogRange", num(dist * 2.5))
-    const("exposure", "1.05")
+    const("exposure", num(THEME["exposure"]))
 
     define_vectors()
     macro("sphT", ["p", "d", "rr"], let(
         [("b", "vd(p, d)"), ("disc", "b * b - (vd(p, p) - rr)")],
         "if(disc > 0.0, if(-b - sqrt(greatest(disc, 0.0)) > $eps, -b - sqrt(greatest(disc, 0.0)), 1e9), 1e9)"))
     macro("planeT", ["o", "d"], f"if({el('d', 3)} < -0.000001 AND {el('o', 3)} > 0.0, -{el('o', 3)} / least({el('d', 3)}, -0.000001), 1e9)")
-    macro("sky", ["d"], f"va(vm($horizon, 1.0 - least(greatest({el('d', 3)} * 3.0, 0.0), 1.0)), vm($zenith, least(greatest({el('d', 3)} * 3.0, 0.0), 1.0)))")
-    macro("checker", ["p"], f"if(({floori(el('p', 1) + ' / ' + num(FLOOR['tile']))} + {floori(el('p', 2) + ' / ' + num(FLOOR['tile']))}) % 2 = 0, {vec(srgb(THEME['floor_a']))}, {vec(srgb(THEME['floor_b']))})")
+    # A dark sky with a glow along the horizon.
+    macro("sky", ["d"], let([("k", f"exp(-greatest({el('d', 3)}, 0.0) * 14.0)")], "va(vm($horizon, k), vm($zenith, 1.0 - k))"))
+    # A polished floor with a thin grid.
+    macro("floorCol", ["p"], let([
+        ("fx", f"{el('p', 1)} / {num(TILE)} - floor({el('p', 1)} / {num(TILE)})"),
+        ("fy", f"{el('p', 2)} / {num(TILE)} - floor({el('p', 2)} / {num(TILE)})"),
+        # The lines fade out with distance, before they get thinner than a pixel.
+        ("fade", f"greatest(1.0 - vlen(vs(p, $eye)) / {num(dist * 1.6)}, 0.0)"),
+        ("line", f"if(least(least(fx, 1.0 - fx), least(fy, 1.0 - fy)) < {num(GRID_LINE)}, fade, 0.0)"),
+    ], f"va(vm({vec(srgb(THEME['grid']))}, line), vm({vec(srgb(THEME['floor']))}, 1.0 - line))"))
     # A portable hash, so both engines jitter the samples identically.
     macro("rnd", ["a", "b", "c"], let([("x", "sin(a * 12.9898 + b * 78.233 + c * 37.719) * 43758.5453")], "x - floor(x)"))
 
     # A text block: intersect the ray with the slab |y - y0| <= r that holds the
-    # spheres, and test only the grid cells under the part of the ray inside it.
+    # tubes, and test only the capsules binned into the cells under that stretch of ray.
     for k, t in enumerate(texts):
-        const(f"bits{k}", t.bits())
-        macro(f"cen{k}", ["i"], f"({num(t.x0)} + (i % {t.nc}) * {num(t.sp)}, {num(t.y0)}, {num(t.zt)} - {idiv('i', t.nc)} * {num(t.sp)})")
+        segs, start, count, ids = t.grid()
+        arr = lambda xs: "[" + ", ".join(num(x) for x in xs) + "]"
+        const(f"pax{k}", arr(p[0] for p, q in segs))
+        const(f"paz{k}", arr(p[1] for p, q in segs))
+        const(f"bax{k}", arr(q[0] - p[0] for p, q in segs))
+        const(f"baz{k}", arr(q[1] - p[1] for p, q in segs))
+        const(f"bb{k}", arr(max((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2, 1e-6) for p, q in segs))
+        const(f"start{k}", "[" + ", ".join(map(str, start)) + "]")
+        const(f"count{k}", "[" + ", ".join(map(str, count)) + "]")
+        const(f"ids{k}", "[" + ", ".join(map(str, ids)) + "]")
+        if any(t.flat):
+            const(f"flat{k}", "[" + ", ".join(map(str, t.flat)) + "]")
+        y0, r, rr = num(t.y0), num(t.r), num(t.r * t.r)
+        seg = [("pa", f"($pax{k}[i + 1], {y0}, $paz{k}[i + 1])"),
+               ("ba", f"($bax{k}[i + 1], 0.0, $baz{k}[i + 1])"),
+               ("baba", f"$bb{k}[i + 1]")]
+        # Ray vs capsule (after Inigo Quilez): the infinite cylinder, then the end caps.
+        macro(f"cap{k}", ["o", "d", "i"], let(seg + [
+            ("oa", "vs(o, pa)"),
+            ("bard", "vd(ba, d)"), ("baoa", "vd(ba, oa)"),
+            ("qa", "greatest(baba - bard * bard, 0.000000001)"),
+            ("qb", "baba * vd(d, oa) - baoa * bard"),
+            ("qc", f"baba * vd(oa, oa) - baoa * baoa - {rr} * baba"),
+            ("h", "qb * qb - qa * qc"),
+            ("tb", "(-qb - sqrt(greatest(h, 0.0))) / qa"),
+            ("yy", "baoa + tb * bard"),
+            ("oc", "if(yy <= 0.0, oa, vs(oa, ba))"),
+            ("b2", "vd(d, oc)"),
+            ("h2", f"b2 * b2 - (vd(oc, oc) - {rr})"),
+            ("tc", "-b2 - sqrt(greatest(h2, 0.0))"),
+        ], "if(h < 0.0, 1e9, if(yy > 0.0 AND yy < baba, if(tb > $eps, tb, 1e9), if(h2 > 0.0 AND tc > $eps, tc, 1e9)))"))
+        flat_n = (f"if($flat{k}[i + 1] = 1, vn(({el('nn', 1)}, {el('nn', 2)}, 0.0)), nn)" if any(t.flat) else "nn")
+        macro(f"capN{k}", ["p", "i"], let(seg + [
+            ("hh", "least(greatest(vd(vs(p, pa), ba) / baba, 0.0), 1.0)"),
+            ("nn", "vn(vs(p, va(pa, vm(ba, hh))))"),
+        ], flat_n))
         ox, oy, oz = el("o", 1), el("o", 2), el("o", 3)
         dx, dy, dz = el("d", 1), el("d", 2), el("d", 3)
-        y0, r, sp = num(t.y0), num(t.r), num(t.sp)
-        ts = amap("c", "cands", f"if($bits{k}[c + 1] = 1, sphT(vs(o, cen{k}(c)), d, {num(t.r * t.r)}), 1e9)")
+        cell, gx0, gz0 = num(t.cell), num(t.gx0), num(t.gz0)
+        slice_ = (f"arraySlice($ids{k}, $start{k}[c + 1] + 1, $count{k}[c + 1])" if CH
+                  else f"list_slice($ids{k}, $start{k}[c + 1] + 1, $start{k}[c + 1] + $count{k}[c + 1])")
         macro(f"text{k}", ["o", "d"], let([
             ("par", f"abs({dy}) < 0.000001"),
             ("dyy", f"if(par, 1.0, {dy})"),
@@ -308,14 +386,29 @@ def build(args):
             ("t1", "least(greatest(ta, tb), 1e5)"),
             ("xa", f"{ox} + {dx} * t0"), ("xb", f"{ox} + {dx} * t1"),
             ("za", f"{oz} + {dz} * t0"), ("zb", f"{oz} + {dz} * t1"),
-            ("gx0", f"greatest({floori(f'(least(xa, xb) - {r} - {num(t.x0)}) / {sp}')}, 0)"),
-            ("gx1", f"least({floori(f'(greatest(xa, xb) + {r} - {num(t.x0)}) / {sp}')} + 1, {t.nc - 1})"),
-            ("gy0", f"greatest({floori(f'({num(t.zt)} - greatest(za, zb) - {r}) / {sp}')}, 0)"),
-            ("gy1", f"if(t1 < t0, -1, least({floori(f'({num(t.zt)} - least(za, zb) + {r}) / {sp}')} + 1, {t.nr - 1}))"),
-            ("cands", flatten(amap("gy", "range(gy0, gy1 + 1)", amap("gx", "range(gx0, gx1 + 1)", f"gy * {t.nc} + gx")))),
-            ("ts", ts),
+            ("cx0", f"greatest({floori(f'(least(xa, xb) - {gx0}) / {cell}')}, 0)"),
+            ("cx1", f"least({floori(f'(greatest(xa, xb) - {gx0}) / {cell}')}, {t.ncx - 1})"),
+            ("cz0", f"greatest({floori(f'(least(za, zb) - {gz0}) / {cell}')}, 0)"),
+            ("cz1", f"if(t1 < t0, -1, least({floori(f'(greatest(za, zb) - {gz0}) / {cell}')}, {t.ncz - 1}))"),
+            ("cells", flatten(amap("cz", "range(cz0, cz1 + 1)", amap("cx", "range(cx0, cx1 + 1)", f"cz * {t.ncx} + cx")))),
+            ("cands", flatten(amap("c", "cells", slice_))),
+            ("ts", amap("i", "cands", f"cap{k}(o, d, i)")),
             ("tm", amin(push("ts", "1e9"))),
         ], f"(tm, if(tm < 1e8, cands[{index_of('ts', 'tm')}], 0))"))
+
+    # The SereneDB mark painted on the side of the ball that faces the camera: a purple
+    # disc, a blue ellipse up and to the right, a white one further up-right (from the SVG).
+    for b in balls:
+        if b.mat == "logo":
+            macro("logoCol", ["p"], let([
+                ("q", f"vm(vs(p, {vec(b.c)}), {num(1.0 / b.r)})"),
+                ("u", "vd(q, $camR)"), ("v", "vd(q, $camU)"),
+                ("front", "vd(q, $camF) < 0.0"),
+                ("b1", "(u - 0.173 - (v - 0.173)) * 0.70711 / 0.833"),
+                ("b2", "(u - 0.173 + (v - 0.173)) * 0.70711 / 0.714"),
+                ("w1", "(u - 0.365 - (v - 0.365)) * 0.70711 / 0.417"),
+                ("w2", "(u - 0.365 + (v - 0.365)) * 0.70711 / 0.350"),
+            ], f"if(front AND w1 * w1 + w2 * w2 <= 1.0, (0.92, 0.92, 0.95), if(front AND b1 * b1 + b2 * b2 <= 1.0, {vec(LOGO_BLUE)}, {vec(PURPLE)}))"))
 
     def ball_t(b, o):
         return f"sphT(vs({o}, {vec(b.c)}), d, {num(b.r * b.r)})"
@@ -341,7 +434,7 @@ def build(args):
     for k in range(len(texts)):
         binds.append((f"h{k}", f"text{k}(o, d)"))
         binds.append((f"t{k}", el(f"h{k}", 1)))
-        objs.append((f"t{k}", mid[texts[k].mat], f"vn(vs(hp, cen{k}({el(f'h{k}', 2)})))"))
+        objs.append((f"t{k}", mid[texts[k].mat], f"capN{k}(hp, {el(f'h{k}', 2)})"))
     for j, b in enumerate(balls):
         binds.append((f"l{j}", ball_t(b, "o")))
         objs.append((f"l{j}", mid[b.mat], f"vn(vs(hp, {vec(b.c)}))"))
@@ -367,7 +460,7 @@ def build(args):
         ("lam", "greatest(vd(ldir, nrm), 0.0) * sh"),
         ("spec", "pow(greatest(vd(ldir, rdir), 0.0), $shin) * sh * matSpec(m)"),
         ("kr", "matKr(m)"),
-        ("base", "if(isFloor, checker(hp), matCol(m))"),
+        ("base", f"if(isFloor, floorCol(hp), if(m = {mid['logo']}, logoCol(hp), matCol(m)))"),
         ("fog", "least(greatest((tHit - $fogStart) / $fogRange, 0.0), 1.0)"),
         ("loc", "va(vm(base, ($amb + matKd(m) * lam) * (1.0 - kr)), (spec, spec, spec))"),
         ("locF", "va(vm(loc, 1.0 - fog), vm($haze, fog))"),
@@ -387,8 +480,10 @@ def build(args):
     numbers = f"numbers_mt({W * H * S})" if CH else f"(SELECT range AS number FROM range({W * H * S}))"
     fold = ("arrayFold((s, i) -> if(tupleElement(s, 5) > 0.5, bounce(s, lpos), s), range(" + str(args.depth) + "), st0)" if CH
             else "list_reduce(range(" + str(args.depth) + "), (s, i) -> if(s[5] > 0.5, bounce(s, lpos), s), st0)")
-    chan = lambda i: (f"CAST(round(least(greatest(pow(greatest(avg({el('col', i)}), 0.0) * $exposure, 1.0 / 2.2), 0.0), 1.0) * 255.0) AS INTEGER)")
-    st0 = (f"(st0r)" if CH else "st0r")
+    # Exposure with a vignette, the ACES filmic curve, then gamma.
+    vig = f"(1.0 - 0.45 * (pow((pixel % {W}) / {num(W)} - 0.5, 2) + pow({idiv('pixel', W)} / {num(H)} - 0.5, 2)))"
+    aces = lambda x: f"least(greatest(({x}) * (2.51 * ({x}) + 0.03) / (({x}) * (2.43 * ({x}) + 0.59) + 0.14), 0.0), 1.0)"
+    chan = lambda i: f"CAST(round(pow({aces(f'greatest(avg({el(chr(99) + chr(111) + chr(108), i)}), 0.0) * $exposure * {vig}')}, 1.0 / 2.2) * 255.0) AS INTEGER)"
     query = f"""SELECT pixel, {chan(1)} AS r, {chan(2)} AS g, {chan(3)} AS b
 FROM (
   SELECT pixel, if({el('st', 5)} > 0.5, va({el('st', 4)}, vmul({el('st', 3)}, sky({el('st', 2)}))), {el('st', 4)}) AS col
@@ -419,8 +514,8 @@ def emit(query):
     if CH:
         withs = [f"{sql} AS c_{n}" for n, sql in CONSTS]
         withs += [f"(({', '.join(p)}) -> {body}) AS {n}" for n, p, body in MACROS]
-        sql = "WITH\n    " + ",\n    ".join(withs) + "\n" + query
-        sql += "\nSETTINGS max_block_size = 8192, optimize_and_compare_chain = 0, short_circuit_function_evaluation = 'force_enable'\nFORMAT TSV;\n"
+        sql = "SET max_query_size = 100000000;\nWITH\n    " + ",\n    ".join(withs) + "\n" + query
+        sql += "\nSETTINGS max_block_size = 2048, optimize_and_compare_chain = 0\nFORMAT TSV;\n"
     else:
         lines = ["SET integer_division = false;"]
         lines += [f"CREATE OR REPLACE MACRO c_{n}() AS {sql};" for n, sql in CONSTS]

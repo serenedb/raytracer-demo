@@ -44,13 +44,17 @@ After the meeting: `./demo.sh stop` frees the laptop's memory.
 ## Measured
 
 1280 x 720, 2 samples per pixel, 3 bounces, 8-core x86 Linux box, both engines in Docker,
-the same picture down to the last pixel:
+the same picture down to the last pixel. ClickHouse runs with the settings its own
+[RayTracer](https://github.com/ClickHouse/RayTracer) queries use
+(`max_block_size = 2048, optimize_and_compare_chain = 0`); SereneDB with its defaults.
 
 | Engine | Time |
 |---|---:|
-| SereneDB 26.10.2 | 5.6 - 7.7 s |
-| ClickHouse 26.9 (its fastest settings: `short_circuit_function_evaluation = 'force_enable'`, `max_block_size = 8192`) | 17.1 - 25.9 s |
-| SereneDB 26.10.1 (before the planner work) | killed: out of memory after 24 s |
+| SereneDB 26.10.2 | ~5 s |
+| ClickHouse 26.9 | ~20-24 s |
+| SereneDB 26.10.1 (before the planner work) | killed: out of memory |
+
+A laptop will give other numbers; the ratio is what matters.
 
 ## How it works
 
@@ -61,7 +65,11 @@ spelling differs (macros vs `WITH` lambdas, `list_transform` vs `arrayMap`, ...)
 - the vectors are tuples of three doubles;
 - a ray's bounces are a fold (`list_reduce` / `arrayFold`) over `range(depth)` whose state is the
   ray: origin, direction, throughput, collected color;
-- the letters are spheres on a grid; a ray only tests the grid cells it actually passes through;
+- the letters are tubes (capsules along the strokes of a small font, `font.py`), binned into a grid
+  of the text plane, so a ray only tests the tubes in the cells it actually passes through;
+- "SereneDB" is the real wordmark from the logo SVG (`wordmark.py`): each letter is filled with
+  tubes clipped to its outline, plus a tube along the outline for the rounded edge;
+- the logo is one ball with the SereneDB mark painted on the side facing the camera;
 - `GROUP BY pixel` averages the samples, and `png.py` turns the `pixel, r, g, b` rows into a PNG.
 
 ```bash
