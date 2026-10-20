@@ -68,5 +68,9 @@ spelling differs (macros vs `WITH` lambdas, `list_transform` vs `arrayMap`, ...)
 python3 gen.py --dialect serenedb --layout banner --width 1920 --height 1080 --samples 4 > scene.sql
 ```
 
+Tweaking the design: edit `gen.py`, then `./preview.sh` renders every layout and theme in a
+few seconds and opens each picture as it's ready; `./preview.sh final` re-renders the
+2560x1440 backups in `images/`.
+
 Knobs for `demo.sh` (environment variables): `WIDTH`, `HEIGHT`, `SAMPLES`, `LAYOUT`
 (`banner` or `investors`), `THEME` (`dark` or `light`), `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE`.

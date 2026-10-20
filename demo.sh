@@ -70,7 +70,11 @@ render() {
 seconds() { python3 -c "print(f'{$(cat "$OUT/$1.ms") / 1000:.1f}')"; }
 
 show() {
-  if command -v open >/dev/null; then open "$@"; else xdg-open "$1" >/dev/null 2>&1 || true; fi
+  if command -v open >/dev/null; then
+    open "$@"
+  else
+    for f in "$@"; do xdg-open "$f" >/dev/null 2>&1 & done
+  fi
 }
 
 case "${1:-render}" in
