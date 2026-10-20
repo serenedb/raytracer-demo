@@ -41,6 +41,46 @@ Want the light version or the other layout? Put it in front of the command:
 
 After the meeting: `./demo.sh stop` frees the laptop's memory.
 
+## Cheat sheet
+
+Run from this folder.
+
+| Command | What it does |
+|---|---|
+| `./demo.sh prepare` | download SereneDB and ClickHouse, quick test run (needs internet) |
+| `./demo.sh` | SereneDB draws the picture and opens it |
+| `./demo.sh race` | SereneDB, then ClickHouse, draw the same picture; prints the times, opens both |
+| `./demo.sh stop` | stop both database containers |
+| `./preview.sh` | quick render of all 4 layout x theme pictures, each opens when it's ready |
+| `LAYOUTS=banner THEMES=dark ./preview.sh` | only one of them |
+| `./preview.sh final` | re-render the 2560x1440 backups in `images/` (about a minute each) |
+| `open images/*.png` (Mac) or `for f in images/*.png; do xdg-open "$f"; done` (Linux) | look at the backups |
+
+Options go in front of a command, e.g. `THEME=light LAYOUT=investors WIDTH=1920 HEIGHT=1080 ./demo.sh race`:
+
+| Option | Values | Default |
+|---|---|---|
+| `LAYOUT` | `banner` (logo on top, investors below), `investors` (investors left, logo right) | `banner` |
+| `THEME` | `dark`, `light` | `dark` |
+| `WIDTH`, `HEIGHT` | picture size in pixels | `1280`, `720` |
+| `SAMPLES` | rays per pixel: higher is smoother and slower | `2` |
+| `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE` | Docker images | `serenedb/serenedb:latest`, `clickhouse/clickhouse-server:26.9` |
+
+`preview.sh` takes `LAYOUTS`, `THEMES` (space-separated lists), `WIDTH`, `HEIGHT` and `SAMPLES`.
+
+Where to change the design, all in `gen.py`:
+
+| What | Where |
+|---|---|
+| investor names | `INVESTORS` (sorted alphabetically on their own) |
+| sky, floor, grid colors, shadow strength, exposure | `THEMES` |
+| how matte, glossy or mirror-like letters and logo are | `MATERIALS` |
+| positions and sizes of the names, the wordmark and the logo ball | `layout()` |
+| the wordmark's tube thickness | `TITLE` |
+| camera | `--fov`, `--elevation` of `gen.py`; the framing is in `build()` |
+
+The investors' letter shapes are in `font.py`; the wordmark comes from the logo SVG (`wordmark.py`).
+
 ## Measured
 
 1280 x 720, 2 samples per pixel, 3 bounces, 8-core x86 Linux box, both engines in Docker,
@@ -75,10 +115,3 @@ spelling differs (macros vs `WITH` lambdas, `list_transform` vs `arrayMap`, ...)
 ```bash
 python3 gen.py --dialect serenedb --layout banner --width 1920 --height 1080 --samples 4 > scene.sql
 ```
-
-Tweaking the design: edit `gen.py`, then `./preview.sh` renders every layout and theme in a
-few seconds and opens each picture as it's ready; `./preview.sh final` re-renders the
-2560x1440 backups in `images/`.
-
-Knobs for `demo.sh` (environment variables): `WIDTH`, `HEIGHT`, `SAMPLES`, `LAYOUT`
-(`banner` or `investors`), `THEME` (`dark` or `light`), `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE`.
