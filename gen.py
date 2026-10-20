@@ -17,11 +17,12 @@ import sys
 
 import font
 
-INVESTORS = [
-    "BALDERTON", "BLACKFIN", "INSIGHT PARTNERS", "DAWN CAPITAL", "CREANDUM",
-    "LEFT LANE PARTNERS", "EURAZEO", "PARTECH", "VENTO", "FORTINO",
-    "SYNDICATEONE", "6 DEGREES",
-]
+# Alphabetical, so the picture does not rank anyone.
+INVESTORS = sorted([
+    "BALDERTON", "SEEDCAMP", "DAWN CAPITAL", "PARTECH", "FORTINO", "FOUNDERS FUTURE",
+    "HEARTCORE", "NORTHZONE", "ATOMICO", "6 DEGREES", "CLEO VENTURES", "SYNDICATE ONE",
+    "100IN", "EURAZEO", "VENTO", "LEFT LANE", "FELIX CAPITAL", "PSG", "BLACKFIN",
+], key=lambda n: (not n[0].isalpha(), n))
 
 CH = False
 _ids = itertools.count()
@@ -138,6 +139,7 @@ PURPLE, BLUE = srgb("#895AF8"), srgb("#80BEFF")
 MATERIALS = {
     "chrome":  ((0.02, 0.02, 0.03), 0.20, 0.78, (0.92, 0.93, 0.97), 1.0),
     "pearl":   ((0.80, 0.80, 0.86), 0.85, 0.22, (1.0, 1.0, 1.0),    0.8),
+    "ink":     (srgb("#2A2352"),    0.90, 0.25, (1.0, 1.0, 1.0),    0.8),
     "violet":  (PURPLE,             0.90, 0.18, (1.0, 1.0, 1.0),    0.7),
     "purple":  (PURPLE,             0.90, 0.10, (1.0, 1.0, 1.0),    0.45),
     "blue":    (BLUE,               0.90, 0.10, (1.0, 1.0, 1.0),    0.45),
@@ -145,9 +147,9 @@ MATERIALS = {
 }
 THEMES = {
     "light": dict(floor_a="#E9E2FF", floor_b="#FFFFFF", floor_kr=0.18, horizon="#F3EEFF", zenith="#6E55C8",
-                  haze="#F1ECFF", amb=0.22, text="chrome"),
+                  haze="#F1ECFF", amb=0.30, text="ink", shadow=0.3),
     "dark":  dict(floor_a="#1B1636", floor_b="#2A2352", floor_kr=0.35, horizon="#3A2C7A", zenith="#07051A",
-                  haze="#2A2160", amb=0.10, text="pearl"),
+                  haze="#2A2160", amb=0.10, text="pearl", shadow=1.0),
 }
 THEME = THEMES["dark"]
 FLOOR = {"tile": 12.0}
@@ -156,15 +158,29 @@ FLOOR = {"tile": 12.0}
 class Text:
     """Lines of text standing on the y = y0 plane; row 0 is the top line."""
 
-    def __init__(self, lines, x0, z_bottom, y0=0.0, sp=1.0, radius=0.6, mat="chrome", align="left", line_gap=3):
-        banners = [font.banner(t) for t in lines]
-        self.nc = max(w for _, w in banners)
+    def __init__(self, lines, x0, z_bottom, y0=0.0, sp=1.0, radius=0.6, mat="chrome", align="left", line_gap=3,
+                 columns=1, col_gap=10):
+        """`lines` fill `columns` columns top to bottom; each column is as wide as its longest line."""
+        per = -(-len(lines) // columns)
+        cols = [[font.banner(t) for t in lines[c * per:(c + 1) * per]] for c in range(columns)]
+        widths = [max(w for _, w in col) for col in cols]
+
+        def cell(b, w, cw):
+            pad = (cw - w) // 2 if align == "center" else 0
+            return ["." * pad + r.ljust(cw - pad, ".") for r in b]
+
         rows = []
-        for i, (b, w) in enumerate(banners):
-            pad = (self.nc - w) // 2 if align == "center" else 0
-            rows += ["." * pad + r.ljust(self.nc - pad, ".") for r in b]
-            if i + 1 < len(banners):
-                rows += ["." * self.nc] * line_gap
+        for i in range(per):
+            if i:
+                rows += [""] * line_gap
+            line = [""] * font.ROWS
+            for c, col in enumerate(cols):
+                b, w = col[i] if i < len(col) else ([""] * font.ROWS, 0)
+                sep = "." * col_gap if c + 1 < len(cols) else ""
+                line = [l + x + sep for l, x in zip(line, cell(b, w, widths[c]))]
+            rows += line
+        self.nc = max(len(r) for r in rows)
+        rows = [r.ljust(self.nc, ".") for r in rows]
         self.rows, self.nr = rows, len(rows)
         self.sp, self.r, self.y0, self.mat = sp, radius * sp, y0, mat
         self.x0 = x0
@@ -183,28 +199,24 @@ class Ball:
 def layout(name):
     texts, balls = [], []
     if name == "investors":
-        # Investors on the left, the SereneDB mark and name on the right.
-        inv = Text(INVESTORS, x0=0.0, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], line_gap=3)
+        # Investors on the left in two columns, the SereneDB mark and name on the right.
+        inv = Text(INVESTORS, x0=0.0, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], columns=2)
         texts.append(inv)
-        R = 0.36 * inv.height
-        cx = inv.width + 0.18 * inv.height + R
-        name_sp = 1.6
-        sdb = Text(["SERENEDB"], x0=0.0, z_bottom=4.0, sp=name_sp, radius=0.72, mat="violet")
+        R = 0.42 * inv.height
+        cx = inv.width + 0.3 * inv.height + R
+        sdb = Text(["SERENEDB"], x0=0.0, z_bottom=4.0, sp=1.6, radius=0.72, mat="violet")
         sdb.x0 = cx - sdb.width / 2
         texts.append(sdb)
         cz = sdb.zt + sdb.r + 0.06 * inv.height + R
         balls += logo((cx, 0.35 * R, cz), R)
         bbox = (0.0, cx + R, 0.0, max(inv.zt, cz + R))
     elif name == "banner":
-        # The SereneDB mark and name on top, the investors in three columns below.
-        cols = [INVESTORS[i::3] for i in range(3)]
-        x, colw = 0.0, []
-        for col in cols:
-            t = Text(col, x0=x, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], align="center")
-            texts.append(t)
-            x += t.width + 12.0
-        total = x - 12.0
-        top = texts[0].zt + 16.0
+        # The SereneDB mark and name on top, the investors in four columns below.
+        inv = Text(INVESTORS, x0=0.0, z_bottom=4.0, sp=1.0, radius=0.62, mat=THEME["text"], align="center",
+                   columns=4, col_gap=12)
+        texts.append(inv)
+        total = inv.width
+        top = inv.zt + 16.0
         sdb = Text(["SERENEDB"], x0=0.0, z_bottom=top, sp=2.6, radius=0.72, mat="violet")
         R = 0.95 * sdb.height
         sdb.x0 = (total - sdb.width + 2.4 * R) / 2
@@ -247,7 +259,8 @@ def build(args):
     right = norm(cross(fwd, (0.0, 0.0, 1.0)))
     up = cross(right, fwd)
     span = max(x1 - x0, z1 - z0)
-    light = (x0 + 0.2 * (x1 - x0), -0.9 * dist, z1 + 1.6 * span)
+    # Near the camera and a bit above it, so the shadows fall behind the letters.
+    light = (x0 + 0.3 * (x1 - x0), eye[1] * 0.8, eye[2] + 0.45 * span)
 
     const("eps", "0.0005")
     const("eye", vec(eye))
@@ -257,6 +270,7 @@ def build(args):
     const("light", vec(light))
     const("lightR", num(0.03 * span))
     const("amb", num(THEME["amb"]))
+    const("shadow", num(THEME["shadow"]))
     const("shin", "70.0")
     const("horizon", vec(srgb(THEME["horizon"])))
     const("zenith", vec(srgb(THEME["zenith"])))
@@ -272,8 +286,8 @@ def build(args):
     macro("planeT", ["o", "d"], f"if({el('d', 3)} < -0.000001 AND {el('o', 3)} > 0.0, -{el('o', 3)} / least({el('d', 3)}, -0.000001), 1e9)")
     macro("sky", ["d"], f"va(vm($horizon, 1.0 - least(greatest({el('d', 3)} * 3.0, 0.0), 1.0)), vm($zenith, least(greatest({el('d', 3)} * 3.0, 0.0), 1.0)))")
     macro("checker", ["p"], f"if(({floori(el('p', 1) + ' / ' + num(FLOOR['tile']))} + {floori(el('p', 2) + ' / ' + num(FLOOR['tile']))}) % 2 = 0, {vec(srgb(THEME['floor_a']))}, {vec(srgb(THEME['floor_b']))})")
-    macro("rnd", ["a", "b", "c"], ("(cityHash64(a, b, c) % 1048576) / 1048576.0" if CH
-                                   else "(hash_city64(a, b, c) % 1048576) / 1048576.0"))
+    # A portable hash, so both engines jitter the samples identically.
+    macro("rnd", ["a", "b", "c"], let([("x", "sin(a * 12.9898 + b * 78.233 + c * 37.719) * 43758.5453")], "x - floor(x)"))
 
     # A text block: intersect the ray with the slab |y - y0| <= r that holds the
     # spheres, and test only the grid cells under the part of the ray inside it.
@@ -349,7 +363,7 @@ def build(args):
         ("tol", "vs(lpos, hp)"),
         ("distL", "vlen(tol)"),
         ("ldir", "vm(tol, 1.0 / distL)"),
-        ("sh", "if(miss, 0.0, if(occluded(shO, ldir, distL), 0.0, 1.0))"),
+        ("sh", "if(miss, 0.0, if(occluded(shO, ldir, distL), 1.0 - $shadow, 1.0))"),
         ("lam", "greatest(vd(ldir, nrm), 0.0) * sh"),
         ("spec", "pow(greatest(vd(ldir, rdir), 0.0), $shin) * sh * matSpec(m)"),
         ("kr", "matKr(m)"),
@@ -406,7 +420,7 @@ def emit(query):
         withs = [f"{sql} AS c_{n}" for n, sql in CONSTS]
         withs += [f"(({', '.join(p)}) -> {body}) AS {n}" for n, p, body in MACROS]
         sql = "WITH\n    " + ",\n    ".join(withs) + "\n" + query
-        sql += "\nSETTINGS max_block_size = 2048, optimize_and_compare_chain = 0\nFORMAT TSV;\n"
+        sql += "\nSETTINGS max_block_size = 8192, optimize_and_compare_chain = 0, short_circuit_function_evaluation = 'force_enable'\nFORMAT TSV;\n"
     else:
         lines = ["SET integer_division = false;"]
         lines += [f"CREATE OR REPLACE MACRO c_{n}() AS {sql};" for n, sql in CONSTS]

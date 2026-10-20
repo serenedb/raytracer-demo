@@ -3,7 +3,7 @@
 A database draws a 3D picture: the SereneDB logo, our name and our investors, ray traced by
 **one SQL query** running inside SereneDB, live on the laptop.
 
-![the picture](images/serenedb_investors.png)
+![the picture](images/serenedb_banner_dark.png)
 
 ## Why it's cool (for the pitch)
 
@@ -11,9 +11,9 @@ A database draws a 3D picture: the SereneDB logo, our name and our investors, ra
 > one SQL query where every pixel is a row, and SereneDB traces the light rays across every
 > core of this laptop. ClickHouse wrote a ray tracer like this to show off its engine. DuckDB
 > can't run it at all, and CedarDB runs it 33 times slower than ClickHouse. SereneDB is built on
-> the DuckDB engine, which we have forked and hardened, and it now runs this kind of query faster
-> than ClickHouse, on ClickHouse's own showcase. It's the same engine that runs our customers'
-> analytics, search and vector queries.
+> the DuckDB engine, which we have forked and hardened, and it draws this picture **3 times faster
+> than ClickHouse**, with the same query and pixel-for-pixel the same image. It's the same engine
+> that runs our customers' analytics, search and vector queries.
 
 ## Instructions for the meeting
 
@@ -30,13 +30,27 @@ You need: the laptop, **Docker Desktop** installed, and this folder.
 
 1. Make sure **Docker Desktop** is running.
 2. In the Terminal (in this folder, see step 3 above), type one of these and press **Enter**:
-   - `./demo.sh` — SereneDB draws the picture (about N seconds), and it opens by itself.
+   - `./demo.sh` — SereneDB draws the picture (a few seconds), and it opens by itself.
    - `./demo.sh race` — SereneDB draws it, then ClickHouse draws the same picture with the same
      query, and the Terminal shows who was faster. Both pictures open at the end.
 
-If anything goes wrong, the finished picture is in the `images` folder: just open it.
+If anything goes wrong, the finished pictures are in the `images` folder: just open one.
+
+Want the light version or the other layout? Put it in front of the command:
+`THEME=light ./demo.sh`, `LAYOUT=investors ./demo.sh race`, or both.
 
 After the meeting: `./demo.sh stop` frees the laptop's memory.
+
+## Measured
+
+1280 x 720, 2 samples per pixel, 3 bounces, 8-core x86 Linux box, both engines in Docker,
+the same picture down to the last pixel:
+
+| Engine | Time |
+|---|---:|
+| SereneDB 26.10.2 | 5.6 - 7.7 s |
+| ClickHouse 26.9 (its fastest settings: `short_circuit_function_evaluation = 'force_enable'`, `max_block_size = 8192`) | 17.1 - 25.9 s |
+| SereneDB 26.10.1 (before the planner work) | killed: out of memory after 24 s |
 
 ## How it works
 
@@ -55,4 +69,4 @@ python3 gen.py --dialect serenedb --layout banner --width 1920 --height 1080 --s
 ```
 
 Knobs for `demo.sh` (environment variables): `WIDTH`, `HEIGHT`, `SAMPLES`, `LAYOUT`
-(`banner` or `investors`), `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE`.
+(`banner` or `investors`), `THEME` (`dark` or `light`), `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE`.
