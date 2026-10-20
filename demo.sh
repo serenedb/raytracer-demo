@@ -13,7 +13,6 @@ CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.9}"
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
 SAMPLES="${SAMPLES:-2}"
-LAYOUT="${LAYOUT:-banner}"
 THEME="${THEME:-dark}"
 OUT=out
 mkdir -p "$OUT"
@@ -54,7 +53,7 @@ start_clickhouse() {
 # render ENGINE: writes $OUT/ENGINE.png and prints the time
 render() {
   local engine=$1 sql="$OUT/$1.sql" tsv="$OUT/$1.tsv" start end
-  python3 gen.py --dialect "$engine" --layout "$LAYOUT" --theme "$THEME" --width "$WIDTH" --height "$HEIGHT" --samples "$SAMPLES" > "$sql"
+  python3 gen.py --dialect "$engine" --theme "$THEME" --width "$WIDTH" --height "$HEIGHT" --samples "$SAMPLES" > "$sql"
   start=$(now_ms)
   if [ "$engine" = serenedb ]; then
     docker exec -i sdb-demo psql -h 127.0.0.1 -p 7890 -U postgres -d postgres -X -q -At -F "$(printf '\t')" \

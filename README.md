@@ -1,9 +1,9 @@
 # raytracer-demo
 
-A database draws a 3D picture: the SereneDB logo, our name and our investors, ray traced by
-**one SQL query** running inside SereneDB, live on the laptop.
+A database draws a 3D picture: the SereneDB logo as a planet, with moons, mirror balls and solid
+stars flying around it, ray traced by **one SQL query** running inside SereneDB, live on the laptop.
 
-![the picture](images/serenedb_banner_dark.png)
+![the picture](images/serenedb_dark.png)
 
 ## Why it's cool (for the pitch)
 
@@ -36,8 +36,7 @@ You need: the laptop, **Docker Desktop** installed, and this folder.
 
 If anything goes wrong, the finished pictures are in the `images` folder: just open one.
 
-Want the light version or the other layout? Put it in front of the command:
-`THEME=light ./demo.sh`, `LAYOUT=investors ./demo.sh race`, or both.
+Want the light version? Put it in front of the command: `THEME=light ./demo.sh`.
 
 After the meeting: `./demo.sh stop` frees the laptop's memory.
 
@@ -51,50 +50,50 @@ Run from this folder.
 | `./demo.sh` | SereneDB draws the picture and opens it |
 | `./demo.sh race` | SereneDB, then ClickHouse, draw the same picture; prints the times, opens both |
 | `./demo.sh stop` | stop both database containers |
-| `./preview.sh` | quick render of all 4 layout x theme pictures, each opens when it's ready |
-| `LAYOUTS=banner THEMES=dark ./preview.sh` | only one of them |
+| `./preview.sh` | quick render of the dark and the light picture, each opens when it's ready |
+| `THEMES=dark ./preview.sh` | only one of them |
 | `./preview.sh final` | re-render the 2560x1440 backups in `images/` (about a minute each) |
 | `open images/*.png` (Mac) or `for f in images/*.png; do xdg-open "$f"; done` (Linux) | look at the backups |
 
-Options go in front of a command, e.g. `THEME=light LAYOUT=investors WIDTH=1920 HEIGHT=1080 ./demo.sh race`:
+Options go in front of a command, e.g. `THEME=light WIDTH=1920 HEIGHT=1080 ./demo.sh race`:
 
 | Option | Values | Default |
 |---|---|---|
-| `LAYOUT` | `banner` (logo on top, investors below), `investors` (investors left, logo right) | `banner` |
 | `THEME` | `dark`, `light` | `dark` |
 | `WIDTH`, `HEIGHT` | picture size in pixels | `1280`, `720` |
 | `SAMPLES` | rays per pixel: higher is smoother and slower | `2` |
 | `SERENEDB_IMAGE`, `CLICKHOUSE_IMAGE` | Docker images | `serenedb/serenedb:latest`, `clickhouse/clickhouse-server:26.9` |
 
-`preview.sh` takes `LAYOUTS`, `THEMES` (space-separated lists), `WIDTH`, `HEIGHT` and `SAMPLES`.
+`preview.sh` takes `THEMES` (a space-separated list), `WIDTH`, `HEIGHT` and `SAMPLES`.
 
 Where to change the design, all in `gen.py`:
 
 | What | Where |
 |---|---|
-| investor names | `INVESTORS` (sorted alphabetically on their own) |
 | sky, floor, grid colors, shadow strength, exposure | `THEMES` |
-| how matte, glossy or mirror-like letters and logo are | `MATERIALS` |
-| positions and sizes of the names, the wordmark and the logo ball | `layout()` |
+| how matte, glossy or mirror-like every object is | `MATERIALS` |
+| the planet's size and the wordmark under it | `PLANET` |
+| the moons and the balls on the floor: where, how big, which material | `MOONS`, `FLOOR_BALLS` |
+| the flying stars: how many, how big, where they may fly (and the seed that places them) | `STARS` |
+| how they are put together | `layout()` |
 | the wordmark's tube thickness | `TITLE` |
-| camera | `--fov`, `--elevation` of `gen.py`; the framing is in `build()` |
+| camera | `--fov`, `--elevation` of `gen.py`; how much room is left around the scene is `FRAME` |
 
-The investors' letter shapes are in `font.py`; the wordmark comes from the logo SVG (`wordmark.py`).
+The wordmark comes from the logo SVG (`wordmark.py`).
 
 ## Measured
 
-1280 x 720, 2 samples per pixel, 3 bounces, 8-core x86 Linux box, both engines in Docker,
-the same picture down to the last pixel. ClickHouse runs with the settings its own
-[RayTracer](https://github.com/ClickHouse/RayTracer) queries use
+1920 x 1080, 2 samples per pixel, 3 bounces, an Apple M1 Pro laptop with Docker Desktop given
+8 CPUs, both engines in Docker, the same picture down to the last pixel. ClickHouse runs with the
+settings its own [RayTracer](https://github.com/ClickHouse/RayTracer) queries use
 (`max_block_size = 2048, optimize_and_compare_chain = 0`); SereneDB with its defaults.
 
 | Engine | Time |
 |---|---:|
-| SereneDB 26.10.2 | ~5 s |
-| ClickHouse 26.9 | ~20-24 s |
-| SereneDB 26.10.1 (before the planner work) | killed: out of memory |
+| SereneDB 26.10.2 | 6.9 s |
+| ClickHouse 26.9.22.3 | 27.3 s |
 
-A laptop will give other numbers; the ratio is what matters.
+Another machine will give other numbers; the ratio is what matters.
 
 ## How it works
 
@@ -105,13 +104,20 @@ spelling differs (macros vs `WITH` lambdas, `list_transform` vs `arrayMap`, ...)
 - the vectors are tuples of three doubles;
 - a ray's bounces are a fold (`list_reduce` / `arrayFold`) over `range(depth)` whose state is the
   ray: origin, direction, throughput, collected color;
-- the letters are tubes (capsules along the strokes of a small font, `font.py`), binned into a grid
-  of the text plane, so a ray only tests the tubes in the cells it actually passes through;
 - "SereneDB" is the real wordmark from the logo SVG (`wordmark.py`): each letter is filled with
-  tubes clipped to its outline, plus a tube along the outline for the rounded edge;
-- the logo is one ball with the SereneDB mark painted on the side facing the camera;
+  tubes (capsules) clipped to its outline, plus a tube along the outline for the rounded edge;
+  the tubes are binned into a grid of the text plane, so a ray only tests the tubes in the cells
+  it actually passes through;
+- the planet is one ball with the SereneDB mark painted on the side facing the camera;
+- every ball (the planet, the moons, the ones on the floor) is an entry of a few arrays, and one
+  `list_transform` / `arrayMap` tests a ray against all of them. One map and not a test per ball,
+  because ClickHouse refuses more than 64 nested lambdas, and every let-binding of the query is one;
+- each star is 20 flat triangles, a five-pointed rim with an apex on either face, tested with
+  Moller-Trumbore; a ray first checks every star's bounding sphere and then only the triangles of
+  the nearest star whose sphere it crosses. The stars cast no shadows: the light is beside the
+  camera, so a shadow would fall where the camera does not see it;
 - `GROUP BY pixel` averages the samples, and `png.py` turns the `pixel, r, g, b` rows into a PNG.
 
 ```bash
-python3 gen.py --dialect serenedb --layout banner --width 1920 --height 1080 --samples 4 > scene.sql
+python3 gen.py --dialect serenedb --width 1920 --height 1080 --samples 4 > scene.sql
 ```
