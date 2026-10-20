@@ -144,7 +144,7 @@ MATERIALS = {
     "pearl":   ((0.78, 0.78, 0.84), 0.80, 0.25, (1.0, 1.0, 1.0),    0.9),
     "ink":     (srgb("#2A2352"),    0.90, 0.05, (1.0, 1.0, 1.0),    0.5),
     "violet":  (PURPLE,             0.75, 0.35, (0.85, 0.80, 1.0),  1.0),
-    "logo":    (PURPLE,             0.90, 0.12, (1.0, 1.0, 1.0),    0.6),
+    "logo":    (PURPLE,             0.90, 0.0,  (1.0, 1.0, 1.0),    0.6),
 }
 THEMES = {
     # haze (the far floor) is the horizon color, so floor and sky meet without a seam.
@@ -408,7 +408,7 @@ def build(args):
                 ("b2", "(u - 0.173 + (v - 0.173)) * 0.70711 / 0.714"),
                 ("w1", "(u - 0.365 - (v - 0.365)) * 0.70711 / 0.417"),
                 ("w2", "(u - 0.365 + (v - 0.365)) * 0.70711 / 0.350"),
-            ], f"if(front AND w1 * w1 + w2 * w2 <= 1.0, (0.92, 0.92, 0.95), if(front AND b1 * b1 + b2 * b2 <= 1.0, {vec(LOGO_BLUE)}, {vec(PURPLE)}))"))
+            ], f"if(front AND w1 * w1 + w2 * w2 <= 1.0, (0.72, 0.72, 0.76), if(front AND b1 * b1 + b2 * b2 <= 1.0, {vec(LOGO_BLUE)}, {vec(PURPLE)}))"))
 
     def ball_t(b, o):
         return f"sphT(vs({o}, {vec(b.c)}), d, {num(b.r * b.r)})"
