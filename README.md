@@ -1,7 +1,7 @@
 # raytracer-demo
 
-A database draws a 3D picture: the SereneDB logo as a planet, with moons, mirror balls and solid
-stars flying around it, ray traced by **one SQL query** running inside SereneDB, live on the laptop.
+A database draws a 3D picture: the SereneDB logo as a planet under a starry sky, ray traced by
+**one SQL query** running inside SereneDB, live on the laptop.
 
 ![the picture](images/serenedb_dark.png)
 
@@ -73,8 +73,7 @@ Where to change the design, all in `gen.py`:
 | sky, floor, grid colors, shadow strength, exposure | `THEMES` |
 | how matte, glossy or mirror-like every object is | `MATERIALS` |
 | the planet's size and the wordmark under it | `PLANET` |
-| the moons and the balls on the floor: where, how big, which material | `MOONS`, `FLOOR_BALLS` |
-| the flying stars: how many, how big, where they may fly (and the seed that places them) | `STARS` |
+| the stars: how dense, how big (how bright is `stars` in `THEMES`; the light sky has none) | `STARS` |
 | how they are put together | `layout()` |
 | the wordmark's tube thickness | `TITLE` |
 | camera | `--fov`, `--elevation` of `gen.py`; how much room is left around the scene is `FRAME` |
@@ -90,8 +89,8 @@ settings its own [RayTracer](https://github.com/ClickHouse/RayTracer) queries us
 
 | Engine | Time |
 |---|---:|
-| SereneDB 26.10.2 | 6.9 s |
-| ClickHouse 26.9.22.3 | 27.3 s |
+| SereneDB 26.10.2 | 3.2 s |
+| ClickHouse 26.9.22.3 | 14.5 s |
 
 Another machine will give other numbers; the ratio is what matters.
 
@@ -109,13 +108,10 @@ spelling differs (macros vs `WITH` lambdas, `list_transform` vs `arrayMap`, ...)
   the tubes are binned into a grid of the text plane, so a ray only tests the tubes in the cells
   it actually passes through;
 - the planet is one ball with the SereneDB mark painted on the side facing the camera;
-- every ball (the planet, the moons, the ones on the floor) is an entry of a few arrays, and one
-  `list_transform` / `arrayMap` tests a ray against all of them. One map and not a test per ball,
-  because ClickHouse refuses more than 64 nested lambdas, and every let-binding of the query is one;
-- each star is 20 flat triangles, a five-pointed rim with an apex on either face, tested with
-  Moller-Trumbore; a ray first checks every star's bounding sphere and then only the triangles of
-  the nearest star whose sphere it crosses. The stars cast no shadows: the light is beside the
-  camera, so a shadow would fall where the camera does not see it;
+- the stars are in the sky, not in the scene: a ray that misses everything looks up which cell of
+  (azimuth, height) it points at, and a hash of the cell decides whether a star sits there, where,
+  how bright and how warm. Only rays straight from the camera see them, so the polished floor
+  does not fill up with reflected stars;
 - `GROUP BY pixel` averages the samples, and `png.py` turns the `pixel, r, g, b` rows into a PNG.
 
 ```bash

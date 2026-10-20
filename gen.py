@@ -12,7 +12,6 @@ lambda, a let-binding, a tuple element or a list function differs.
 import argparse
 import itertools
 import math
-import random
 import re
 import sys
 
@@ -108,9 +107,6 @@ def define_vectors():
         macro("vd", ["a", "b"], "dotProduct(a, b)")
         macro("vlen", ["a"], "L2Norm(a)")
         macro("vn", ["a"], "L2Normalize(a)")
-        macro("vx", ["a", "b"], f"({el('a', 2)} * {el('b', 3)} - {el('a', 3)} * {el('b', 2)}, "
-                                f"{el('a', 3)} * {el('b', 1)} - {el('a', 1)} * {el('b', 3)}, "
-                                f"{el('a', 1)} * {el('b', 2)} - {el('a', 2)} * {el('b', 1)})")
     else:
         x = lambda i: el("x", i)
         y = lambda i: el("y", i)
@@ -121,9 +117,6 @@ def define_vectors():
         macro("vd", ["a", "b"], let([("x", "a"), ("y", "b")], f"{x(1)} * {y(1)} + {x(2)} * {y(2)} + {x(3)} * {y(3)}"))
         macro("vlen", ["a"], let([("x", "a")], f"sqrt({x(1)} * {x(1)} + {x(2)} * {x(2)} + {x(3)} * {x(3)})"))
         macro("vn", ["a"], let([("x", "a"), ("y", "vlen(x)")], f"({x(1)} / y, {x(2)} / y, {x(3)} / y)"))
-        macro("vx", ["a", "b"], let([("x", "a"), ("y", "b")], f"({x(2)} * {y(3)} - {x(3)} * {y(2)}, "
-                                                              f"{x(3)} * {y(1)} - {x(1)} * {y(3)}, "
-                                                              f"{x(1)} * {y(2)} - {x(2)} * {y(1)})"))
     macro("vref", ["d", "n"], "vs(d, vm(n, 2.0 * vd(d, n)))")
 
 
@@ -142,49 +135,26 @@ LOGO_BLUE = srgb("#5FA8FF")   # a touch deeper: the filmic curve lifts it back
 MATERIALS = {
     "violet":  (PURPLE,             0.75, 0.35, (0.85, 0.80, 1.0),  1.0),
     "logo":    (PURPLE,             0.90, 0.0,  (1.0, 1.0, 1.0),    0.6),
-    # A mirror with a cold tint: it shows the whole scene back.
-    "chrome":  ((0.85, 0.86, 0.92), 0.20, 0.82, (0.95, 0.96, 1.0),  1.0),
-    "pearl":   ((0.82, 0.82, 0.88), 0.80, 0.22, (1.0, 1.0, 1.0),    0.9),
-    # The stars: bright, a little glossy, faceted by their flat triangles.
-    "star":    ((0.95, 0.94, 1.0),  0.85, 0.25, (1.0, 1.0, 1.0),    1.0),
 }
 THEMES = {
     # haze (the far floor) is the horizon color, so floor and sky meet without a seam.
+    # stars: how bright the star field is; a daytime sky has none.
     "light": dict(floor="#F4F1FF", grid="#B9A8F2", floor_kr=0.25, horizon="#E9E3FF", zenith="#9C8BE6",
-                  amb=0.30, shadow=0.3, exposure=0.95),
+                  amb=0.30, shadow=0.3, exposure=0.95, stars=0.0),
     "dark":  dict(floor="#0E0B22", grid="#5A43C9", floor_kr=0.45, horizon="#24195E", zenith="#05040F",
-                  amb=0.10, shadow=1.0, exposure=1.6),
+                  amb=0.10, shadow=1.0, exposure=1.6, stars=1.0),
 }
 THEME = THEMES["dark"]
 # The wordmark: bold, wide tubes, like the SereneDB logo's lettering.
 TITLE = dict(tube=0.3, cell=0.8)
 # The planet floats over the middle of the wordmark: its radius is a fraction of the
-# wordmark's width, `gap` is the air between them. Everything else is placed in planet
-# radii from its centre: x to the right, y away from the camera, z up.
-PLANET = dict(title_z=3.0, title_size=2.2, radius=0.42, gap=12.0)
-# Moons around the planet: (x, y, z) of the centre, radius, material.
-MOONS = [
-    ((-2.45, 0.30, 0.80), 0.24, "chrome"),
-    ((2.40, -0.10, 1.00), 0.15, "pearl"),
-    ((1.55, -1.10, -1.05), 0.09, "pearl"),
-]
-# Balls resting on the floor: (x, y) in planet radii from under its centre, radius, material.
-FLOOR_BALLS = [
-    ((-2.15, -0.30), 0.36, "chrome"),
-    ((2.05, -0.75), 0.27, "pearl"),
-    ((-1.25, -1.55), 0.14, "pearl"),
-    ((1.25, -1.70), 0.12, "chrome"),
-    ((-3.05, 0.90), 0.20, "pearl"),
-    ((3.10, 0.70), 0.30, "chrome"),
-]
-# Solid five-pointed stars flying around the planet, placed by a seeded shuffle so the
-# picture is the same on every run: how many, the range of their radii, and the box they
-# fly in (x, y, z ranges), all in planet radii from its centre. A star never sits in front
-# of the planet's face, nor too close to another object.
-STARS = dict(count=26, seed=11, size=(0.08, 0.28), box=((-4.4, 4.4), (-1.6, 5.0), (-0.55, 2.15)))
+# wordmark's width, `gap` is the air between them.
+PLANET = dict(title_z=3.0, title_size=2.2, radius=0.47, gap=6.0)
 # How much bigger than the scene the picture is, in each direction: the rest is sky and floor.
 FRAME = 1.25
-
+# The sky is cut into cells of `cell` radians of azimuth by height; a cell holds a star
+# with probability `density`, somewhere inside it, `size` radians in radius at its faintest.
+STARS = dict(cell=0.012, density=0.35, size=0.0007)
 TILE = 8.0
 GRID_LINE = 0.035   # half-width of a floor grid line, as a fraction of a tile
 
@@ -256,61 +226,8 @@ class Ball:
         self.c, self.r, self.mat = c, r, mat
 
 
-class Star:
-    """A solid five-pointed star: ten points round its rim, alternately out and in, and an
-    apex on each face, so twenty flat triangles. It lies in the x-z plane facing the
-    camera, then is turned by (yaw, pitch, roll) and moved to c."""
-
-    TRIANGLES = 20
-
-    def __init__(self, c, size, turn, mat="star", inner=0.45, depth=0.42):
-        self.c, self.r, self.mat = c, size, mat
-        yaw, pitch, roll = (math.radians(a) for a in turn)
-        rz = ((math.cos(yaw), -math.sin(yaw), 0.0), (math.sin(yaw), math.cos(yaw), 0.0), (0.0, 0.0, 1.0))
-        rx = ((1.0, 0.0, 0.0), (0.0, math.cos(pitch), -math.sin(pitch)), (0.0, math.sin(pitch), math.cos(pitch)))
-        ry = ((math.cos(roll), 0.0, math.sin(roll)), (0.0, 1.0, 0.0), (-math.sin(roll), 0.0, math.cos(roll)))
-        m = matmul(rz, matmul(rx, ry))
-        at = lambda v: tuple(c[i] + sum(m[i][j] * v[j] for j in range(3)) for i in range(3))
-        rim = []
-        for k in range(10):
-            a = math.pi / 2 + k * math.pi / 5
-            r = size if k % 2 == 0 else size * inner
-            rim.append(at((r * math.cos(a), 0.0, r * math.sin(a))))
-        front, back = at((0.0, -depth * size, 0.0)), at((0.0, depth * size, 0.0))
-        self.tris = []
-        for k in range(10):
-            p, q = rim[k], rim[(k + 1) % 10]
-            self.tris += [(p, q, front), (q, p, back)]
-
-
-def place_stars(planet, moons, R):
-    rng = random.Random(STARS["seed"])
-    (xa, xb), (ya, yb), (za, zb) = STARS["box"]
-    lo, hi = STARS["size"]
-    stars = []
-    while len(stars) < STARS["count"]:
-        x, y, z = rng.uniform(xa, xb), rng.uniform(ya, yb), rng.uniform(za, zb)
-        r = lo + (hi - lo) * rng.random() ** 2   # mostly small, a few big
-        c = (planet.c[0] + x * R, y * R, planet.c[2] + z * R)
-        # Not over the planet's face, as the camera sees it.
-        if abs(x) < 1.35 and abs(z) < 1.35 and y < 1.0:
-            continue
-        others = [planet] + moons + stars
-        if any(math.dist(c, o.c) < o.r + r * R + 0.25 * R for o in others):
-            continue
-        # Mostly facing the camera, turned enough that the facets catch the light.
-        turn = (rng.uniform(-50, 50), rng.uniform(-40, 40), rng.uniform(0, 72))
-        stars.append(Star(c, r * R, turn))
-    return stars
-
-
-def matmul(a, b):
-    return tuple(tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)) for i in range(3))
-
-
 def layout():
-    """The SereneDB mark as a planet in the middle of the picture, moons and solid stars
-    flying around it, the name on the floor under it, and balls resting on that floor.
+    """The SereneDB mark as a planet in the middle of the picture, the name on the floor under it.
 
     Returns the objects, the box the picture must hold (the wordmark's reflection
     included) and the height the camera aims at: the planet's centre.
@@ -318,23 +235,15 @@ def layout():
     title = Wordmark(x0=0.0, z_bottom=PLANET["title_z"], size=PLANET["title_size"], mat="violet", **TITLE)
     R = PLANET["radius"] * title.width
     cx = title.width / 2
-    cz = title.zt + PLANET["gap"] + R
-    planet = Ball((cx, 0.0, cz), R, "logo")
-    moons = [Ball((cx + x * R, y * R, cz + z * R), r * R, m) for (x, y, z), r, m in MOONS]
-    floor = [Ball((cx + x * R, y * R, r * R), r * R, m) for (x, y), r, m in FLOOR_BALLS]
-    stars = place_stars(planet, moons, R)
-    balls = [planet] + moons + floor
-    # The picture is framed on the balls; stars may fly off its edges.
-    x0 = min(b.c[0] - b.r for b in balls)
-    x1 = max(b.c[0] + b.r for b in balls)
-    z1 = max(b.c[2] + b.r for b in balls)
-    return [title], balls, stars, (x0, x1, -title.zt, z1), cz
+    ball = Ball((cx, 0.0, title.zt + PLANET["gap"] + R), R, "logo")
+    bbox = (cx - R, cx + R, -title.zt, ball.c[2] + R)
+    return [title], [ball], bbox, ball.c[2]
 
 
 # ---- the query --------------------------------------------------------------------
 
 def build(args):
-    texts, balls, stars, (x0, x1, z0, z1), aim = layout()
+    texts, balls, (x0, x1, z0, z1), aim = layout()
     mats = list(MATERIALS)
     mid = {m: i + 1 for i, m in enumerate(mats)}   # 0 is the floor
 
@@ -343,7 +252,7 @@ def build(args):
     aspect = args.width / args.height
     fov = math.radians(args.fov)
     th = math.tan(fov / 2)
-    w, h = (x1 - x0) * 1.06, 2 * max(z1 - aim, aim - z0) * FRAME
+    w, h = (x1 - x0) * FRAME, 2 * max(z1 - aim, aim - z0) * FRAME
     dist = max(h / 2 / th, w / 2 / (th * aspect))
     target = ((x0 + x1) / 2, 0.0, aim)
     elev = math.radians(args.elevation)
@@ -352,9 +261,8 @@ def build(args):
     right = norm(cross(fwd, (0.0, 0.0, 1.0)))
     up = cross(right, fwd)
     span = max(x1 - x0, z1 - z0)
-    # Near the camera and a little above and left of it, so the shadows fall behind the
-    # objects rather than on the wordmark under them.
-    light = (x0 + 0.3 * (x1 - x0), eye[1] * 0.8, eye[2] + 0.12 * span)
+    # Near the camera and a bit above it, so the shadows fall behind the letters.
+    light = (x0 + 0.3 * (x1 - x0), eye[1] * 0.8, eye[2] + 0.45 * span)
 
     const("eps", "0.0005")
     const("eye", vec(eye))
@@ -381,10 +289,29 @@ def build(args):
         [("b", "vd(p, d)"), ("disc", "b * b - (vd(p, p) - rr)")],
         "if(disc > 0.0, if(-b - sqrt(greatest(disc, 0.0)) > $eps, -b - sqrt(greatest(disc, 0.0)), 1e9), 1e9)"))
     macro("planeT", ["o", "d"], f"if({el('d', 3)} < -0.000001 AND {el('o', 3)} > 0.0, -{el('o', 3)} / least({el('d', 3)}, -0.000001), 1e9)")
-    # A portable hash, so both engines jitter the samples identically.
+    # A portable hash, so both engines jitter the samples (and place the stars) identically.
     macro("rnd", ["a", "b", "c"], let([("x", "sin(a * 12.9898 + b * 78.233 + c * 37.719) * 43758.5453")], "x - floor(x)"))
-    # A dark sky with a glow along the horizon.
-    macro("sky", ["d"], let([("k", f"exp(-greatest({el('d', 3)}, 0.0) * 14.0)")], "va(vm($horizon, k), vm($zenith, 1.0 - k))"))
+    # A dark sky with a glow along the horizon, and stars that fade into that glow.
+    glow = "va(vm($horizon, k), vm($zenith, 1.0 - k))"
+    if THEME["stars"] > 0:
+        cell, dens = STARS["cell"], STARS["density"]
+        macro("star", ["d"], let([
+            # Azimuth and height of the direction, in cells; the camera looks along +y.
+            ("su", f"atan2({el('d', 1)}, {el('d', 2)}) / {num(cell)}"),
+            ("sv", f"{el('d', 3)} / {num(cell)}"),
+            ("cu", "floor(su)"), ("cv", "floor(sv)"),
+            ("roll", "rnd(cu, cv, 7.0)"),
+            # 0 for the faintest star there is, 1 for the brightest.
+            ("mag", f"(roll - {num(1.0 - dens)}) / {num(dens)}"),
+            ("px", "cu + 0.2 + 0.6 * rnd(cu, cv, 8.0)"),
+            ("py", "cv + 0.2 + 0.6 * rnd(cu, cv, 9.0)"),
+            ("dd", f"((su - px) * (su - px) + (sv - py) * (sv - py)) * {num((cell / STARS['size']) ** 2)}"),
+            ("lum", f"if(roll > {num(1.0 - dens)}, (0.25 + 3.0 * pow(mag, 4)) * exp(-dd / (1.0 + 2.0 * mag * mag)), 0.0)"),
+            # Some a little blue, some a little warm; all of them gone into the horizon's glow.
+            ("hue", "rnd(cu, cv, 10.0)"),
+            ("k", f"exp(-greatest({el('d', 3)}, 0.0) * 14.0)"),
+        ], f"vm(va(vm({vec((0.78, 0.86, 1.0))}, hue), vm({vec((1.0, 0.9, 0.78))}, 1.0 - hue)), lum * {num(THEME['stars'])} * (1.0 - k))"))
+    macro("sky", ["d"], let([("k", f"exp(-greatest({el('d', 3)}, 0.0) * 14.0)")], glow))
     # A polished floor with a thin grid.
     macro("floorCol", ["p"], let([
         ("fx", f"{el('p', 1)} / {num(TILE)} - floor({el('p', 1)} / {num(TILE)})"),
@@ -472,63 +399,11 @@ def build(args):
                 ("w2", "(u - 0.365 + (v - 0.365)) * 0.70711 / 0.350"),
             ], f"if(front AND w1 * w1 + w2 * w2 <= 1.0, (0.72, 0.72, 0.76), if(front AND b1 * b1 + b2 * b2 <= 1.0, {vec(LOGO_BLUE)}, {vec(PURPLE)}))"))
 
-    # The stars are triangles, again in arrays: a vertex and two edges of each, and its
-    # normal. A ray first tests each star's bounding sphere, then only the triangles of the
-    # nearest star whose sphere it crosses (Moller-Trumbore).
-    tris = [t for st in stars for t in st.tris]
-    e1s = [sub(t[1], t[0]) for t in tris]
-    e2s = [sub(t[2], t[0]) for t in tris]
-    vecs = lambda vs: "[" + ", ".join(vec(v) for v in vs) + "]"
-    const("tv", vecs(t[0] for t in tris))
-    const("t1", vecs(e1s))
-    const("t2", vecs(e2s))
-    const("tn", vecs(norm(cross(a, b)) for a, b in zip(e1s, e2s)))
-    const("sc", vecs(st.c for st in stars))
-    const("srr", "[" + ", ".join(num((st.r * 1.01) ** 2) for st in stars) + "]")
-    macro("triT", ["o", "d", "j"], let([
-        ("v0", "$tv[j + 1]"),
-        ("e1", "$t1[j + 1]"),
-        ("e2", "$t2[j + 1]"),
-        ("pv", "vx(d, e2)"),
-        ("det", "vd(e1, pv)"),
-        ("inv", "1.0 / if(abs(det) < 0.000000001, 0.000000001, det)"),
-        ("sv", "vs(o, v0)"),
-        ("u", "vd(sv, pv) * inv"),
-        ("qv", "vx(sv, e1)"),
-        ("w", "vd(d, qv) * inv"),
-        ("t", "vd(e2, qv) * inv"),
-    ], "if(abs(det) > 0.000000001 AND u >= 0.0 AND u <= 1.0 AND w >= 0.0 AND u + w <= 1.0 AND t > $eps, t, 1e9)"))
-    T = Star.TRIANGLES
-    macro("starHit", ["o", "d"], let([
-        # Where the ray enters each star's bounding sphere, 1e9 if it does not.
-        ("bt", amap("i", f"range({len(stars)})", let([
-            ("oc", "vs(o, $sc[i + 1])"),
-            ("b", "vd(oc, d)"),
-            ("disc", "b * b - (vd(oc, oc) - $srr[i + 1])"),
-        ], "if(disc > 0.0 AND -b + sqrt(greatest(disc, 0.0)) > 0.0, -b - sqrt(greatest(disc, 0.0)), 1e9)"))),
-        ("tb", amin("bt")),
-        ("k", f"{index_of('bt', 'tb')} - 1"),
-        # Only the nearest of them is tested: the stars do not overlap enough for the one
-        # behind to matter, and one star's triangles are one fixed range.
-        ("ts", f"if(tb < 1e8, {amap('j', f'range(k * {T}, k * {T} + {T})', 'triT(o, d, j)')}, [1e9])"),
-        ("tm", amin("ts")),
-    ], f"(tm, if(tm < 1e8, k * {T} + {index_of('ts', 'tm')} - 1, 0))"))
-
-    # Every ball is an entry of three arrays, and one map over them tests them all. One
-    # map and not a test per ball, because ClickHouse refuses more than 64 nested lambdas
-    # and each let-binding is one: this way the depth does not grow with the scene.
-    nums = lambda xs: "[" + ", ".join(num(x) for x in xs) + "]"
-    const("bc", "[" + ", ".join(vec(b.c) for b in balls) + "]")
-    const("brr", nums(b.r * b.r for b in balls))
-    const("bm", "[" + ", ".join(str(mid[b.mat]) for b in balls) + "]")
-    macro("ballTs", ["o", "d"], amap("i", f"range({len(balls)})",
-                                     "sphT(vs(o, $bc[i + 1]), d, $brr[i + 1])"))
+    def ball_t(b, o):
+        return f"sphT(vs({o}, {vec(b.c)}), d, {num(b.r * b.r)})"
 
     hits = [f"{el(f'text{k}(o, d)', 1)} < maxd" for k in range(len(texts))]
-    hits += [f"{amin('ballTs(o, d)')} < maxd"]
-    # The stars cast no shadows. The light is beside the camera, so a star's shadow
-    # falls behind it, where the camera does not see it, and testing every shadow ray
-    # against their triangles would cost a good part of the render for nothing.
+    hits += [f"{ball_t(b, 'o')} < maxd" for b in balls]
     macro("occluded", ["o", "d", "maxd"], " OR ".join(hits))
 
     def by_mat(field, default):
@@ -549,12 +424,9 @@ def build(args):
         binds.append((f"h{k}", f"text{k}(o, d)"))
         binds.append((f"t{k}", el(f"h{k}", 1)))
         objs.append((f"t{k}", mid[texts[k].mat], f"capN{k}(hp, {el(f'h{k}', 2)})"))
-    binds += [("bts", "ballTs(o, d)"), ("tB", amin("bts")), ("iB", index_of("bts", "tB"))]
-    objs.append(("tB", "$bm[iB]", "vn(vs(hp, $bc[iB]))"))
-    binds += [("hs", "starHit(o, d)"), ("tS", el("hs", 1)), ("jS", el("hs", 2))]
-    # Two-sided: a star's facet faces whoever is looking at it.
-    sn = "$tn[jS + 1]"
-    objs.append(("tS", mid["star"], f"if(vd(d, {sn}) < 0.0, {sn}, vm({sn}, -1.0))"))
+    for j, b in enumerate(balls):
+        binds.append((f"l{j}", ball_t(b, "o")))
+        objs.append((f"l{j}", mid[b.mat], f"vn(vs(hp, {vec(b.c)}))"))
     mat_expr, nrm_expr = "0", "(0.0, 0.0, 1.0)"
     for tv, m, n in reversed(objs):
         mat_expr = f"if({tv} = tObj, {m}, {mat_expr})"
@@ -582,7 +454,10 @@ def build(args):
         ("loc", "va(vm(base, ($amb + matKd(m) * lam) * (1.0 - kr)), (spec, spec, spec))"),
         ("locF", "va(vm(loc, 1.0 - fog), vm($haze, fog))"),
     ]
-    body = ("if(miss, (o, d, thr, va(acc, vmul(thr, sky(d))), 0.0), "
+    # Stars are seen straight from the camera only: a ray that has bounced off anything has
+    # thr < 1, and a floor full of reflected stars hides where the horizon is.
+    sky = f"va(sky(d), if({el('thr', 1)} > 0.999, star(d), (0.0, 0.0, 0.0)))" if THEME["stars"] > 0 else "sky(d)"
+    body = (f"if(miss, (o, d, thr, va(acc, vmul(thr, {sky})), 0.0), "
             "(shO, rdir, vm(vmul(thr, matTint(m)), kr * (1.0 - fog)), va(acc, vmul(thr, locF)), if(kr > 0.001, 1.0, 0.0)))")
     macro("bounce", ["s", "lpos"], let(binds, body))
 
